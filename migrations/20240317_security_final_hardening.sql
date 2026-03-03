@@ -15,6 +15,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 CREATE OR REPLACE FUNCTION public.protect_profile_fields()
 RETURNS TRIGGER AS $$
 BEGIN
+  -- If the user is NOT an admin, they cannot change is_admin or is_pro
   IF NOT EXISTS (
     SELECT 1 FROM public.profiles 
     WHERE id = auth.uid() AND is_admin = true
