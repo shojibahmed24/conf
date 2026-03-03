@@ -1,3 +1,6 @@
+-- INITIAL SCHEMA FOR MYQURANAPP
+
+-- 1. Profiles Table
 CREATE TABLE IF NOT EXISTS profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
   username TEXT UNIQUE,
@@ -7,6 +10,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- 2. Confessions Table (Audio Posts)
 CREATE TABLE IF NOT EXISTS confessions (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
@@ -17,12 +21,13 @@ CREATE TABLE IF NOT EXISTS confessions (
   mood_tag TEXT,
   emotional_score JSONB DEFAULT '{"sad": 0, "hopeful": 0, "angry": 0, "lonely": 0, "neutral": 100}'::jsonb,
   ai_summary TEXT,
-  plays_count INTEGER DEFAULT 0,
+  plays_count INTEGER DEFAULT 0 CHECK (plays_count >= 0),
   is_anonymous BOOLEAN DEFAULT TRUE,
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'flagged', 'removed')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- 3. Reactions Table
 CREATE TABLE IF NOT EXISTS reactions (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   confession_id UUID REFERENCES confessions(id) ON DELETE CASCADE,
@@ -31,123 +36,32 @@ CREATE TABLE IF NOT EXISTS reactions (
   UNIQUE(confession_id, user_id)
 );
 
+-- 4. Comments Table
 CREATE TABLE IF NOT EXISTS comments (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   confession_id UUID REFERENCES confessions(id) ON DELETE CASCADE,
   user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
-  parent_id UUID REFERENCES comments(id) ON DELETE CASCADE,
-  audio_url TEXT,
+  audio_url TEXT NOT NULL,
+  duration INTEGER,
   content TEXT,
-  waveform JSONB,
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'flagged', 'removed')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- 5. Reports Table
 CREATE TABLE IF NOT EXISTS reports (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   reporter_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
-  confession_id UUID REFERENCES confessions(id) ON DELETE CASCADE,
-  comment_id UUID REFERENCES comments(id) ON DELETE CASCADE,
+  target_type TEXT NOT NULL CHECK (target_type IN ('confession', 'comment')),
+  target_id UUID NOT NULL,
   reason TEXT,
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'resolved', 'dismissed')),
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'reviewed', 'resolved')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- RLS POLICIES
+-- Enable RLS on all tables
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Public profiles are viewable by everyone" ON profiles FOR SELECT USING (true);
-CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
-
 ALTER TABLE confessions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Public confessions are viewable by everyone" ON confessions FOR SELECT USING (status = 'active' OR auth.uid() = user_id OR (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)));
-CREATE POLICY "Users can insert their own confessions" ON confessions FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can delete own confessions" ON confessions FOR DELETE USING (auth.uid() = user_id OR (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)));
-CREATE POLICY "Admins can update any confession" ON confessions FOR UPDATE USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true));
-
 ALTER TABLE reactions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Reactions are viewable by everyone" ON reactions FOR SELECT USING (true);
-CREATE POLICY "Authenticated users can react" ON reactions FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can delete own reaction" ON reactions FOR DELETE USING (auth.uid() = user_id);
-
 ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Comments are viewable by everyone" ON comments FOR SELECT USING (status = 'active' OR auth.uid() = user_id OR (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)));
-CREATE POLICY "Authenticated users can comment" ON comments FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can delete own comments" ON comments FOR DELETE USING (auth.uid() = user_id OR (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)));
-CREATE POLICY "Admins can update any comment" ON comments FOR UPDATE USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true));
-
 ALTER TABLE reports ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Admins can view reports" ON reports FOR SELECT USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true));
-CREATE POLICY "Authenticated users can report" ON reports FOR INSERT WITH CHECK (auth.uid() = reporter_id);
-CREATE POLICY "Admins can update reports" ON reports FOR UPDATE USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true));
-
--- SECURITY FUNCTIONS & TRIGGERS
-
--- 1. Secure Play Counter (Atomic)
-CREATE OR REPLACE FUNCTION public.increment_plays(confession_id UUID)
-RETURNS void AS $$
-BEGIN
-  UPDATE public.confessions
-  SET plays_count = COALESCE(plays_count, 0) + 1
-  WHERE id = confession_id
-  AND status = 'active';
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
-
--- 2. Prevent Privilege Escalation
-CREATE OR REPLACE FUNCTION public.protect_profile_fields()
-RETURNS TRIGGER AS $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM public.profiles 
-    WHERE id = auth.uid() AND is_admin = true
-  ) THEN
-    IF TG_OP = 'INSERT' THEN
-      NEW.is_admin := FALSE;
-      NEW.is_pro := FALSE;
-    ELSIF TG_OP = 'UPDATE' THEN
-      NEW.is_admin := OLD.is_admin;
-      NEW.is_pro := OLD.is_pro;
-    END IF;
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
-
-DROP TRIGGER IF EXISTS on_profile_update_protect ON public.profiles;
-CREATE TRIGGER on_profile_update_protect
-  BEFORE INSERT OR UPDATE ON public.profiles
-  FOR EACH ROW EXECUTE PROCEDURE public.protect_profile_fields();
-
--- 3. Secure User Creation
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS trigger AS $$
-DECLARE
-  username_val TEXT;
-BEGIN
-  username_val := COALESCE(
-    new.raw_user_meta_data->>'username',
-    new.raw_user_meta_data->>'full_name',
-    split_part(new.email, '@', 1),
-    'user_' || substr(new.id::text, 1, 8)
-  );
-
-  INSERT INTO public.profiles (id, username, avatar_url, is_admin, is_pro)
-  VALUES (
-    new.id,
-    username_val,
-    new.raw_user_meta_data->>'avatar_url',
-    FALSE,
-    FALSE
-  )
-  ON CONFLICT (id) DO UPDATE SET
-    username = EXCLUDED.username,
-    avatar_url = EXCLUDED.avatar_url;
-
-  RETURN new;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
-
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
