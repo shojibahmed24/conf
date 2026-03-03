@@ -20,7 +20,6 @@ USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin 
 CREATE OR REPLACE FUNCTION public.protect_profile_fields()
 RETURNS TRIGGER AS $$
 BEGIN
-  -- Only allow admins to change is_admin or is_pro flags
   IF NOT EXISTS (
     SELECT 1 FROM public.profiles 
     WHERE id = auth.uid() AND is_admin = true
@@ -43,10 +42,8 @@ CREATE TRIGGER on_profile_update_protect
   FOR EACH ROW EXECUTE PROCEDURE public.protect_profile_fields();
 
 -- 3. Ensure Storage Policies are strict
--- This assumes buckets 'confessions' and 'comments' exist
 DO $$
 BEGIN
-    -- Confessions Bucket
     DROP POLICY IF EXISTS "Strict authenticated upload" ON storage.objects;
     CREATE POLICY "Strict authenticated upload" 
     ON storage.objects FOR INSERT 
@@ -63,5 +60,12 @@ BEGIN
       bucket_id IN ('confessions', 'comments') 
       AND auth.role() = 'authenticated'
       AND (storage.foldername(name))[1] = auth.uid()::text
+    );
+    
+    DROP POLICY IF EXISTS "Admins can delete any file" ON storage.objects;
+    CREATE POLICY "Admins can delete any file" 
+    ON storage.objects FOR DELETE 
+    USING (
+      EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = true)
     );
 END $$;
