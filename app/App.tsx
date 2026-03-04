@@ -1,147 +1,71 @@
-import React, { useEffect, useState } from 'react';
-import { supabase, isSupabaseConfigured } from './lib/supabase';
-import Auth from './components/Auth';
-import Feed from './components/Feed';
-import Dashboard from './components/Dashboard';
-import Recorder from './components/Recorder';
-import { 
-  Mic, 
-  LayoutDashboard, 
-  Radio, 
-  Bell, 
-  User, 
-  Plus, 
-  X,
-  Settings,
-  LogOut
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Tasbih } from './components/Tasbih';
+import { PrayerCard } from './components/PrayerCard';
+import { BottomNav } from './components/BottomNav';
+import { Book, Clock, Fingerprint, Home } from 'lucide-react';
 
-export default function App() {
-  const [session, setSession] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<'feed' | 'dashboard'>('feed');
-  const [profile, setProfile] = useState<any>(null);
-  const [showRecorder, setShowRecorder] = useState(false);
+type View = 'home' | 'quran' | 'tasbih' | 'prayer';
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session) fetchProfile(session.user.id);
-      setLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session) fetchProfile(session.user.id);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  async function fetchProfile(userId: string) {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    if (data) setProfile(data);
-  }
-
-  if (loading) return (
-    <div className="min-h-screen bg-stone-50 flex items-center justify-center">
-      <div className="flex flex-col items-center gap-4">
-        <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-zinc-500 font-medium animate-pulse">EchoVault is warming up...</p>
-      </div>
-    </div>
-  );
-
-  if (!session) return <Auth />;
+const App: React.FC = () => {
+  const [activeView, setActiveView] = useState<View>('home');
 
   return (
-    <div className="min-h-screen bg-stone-50 text-zinc-900 pb-24">
-      {/* Header */}
-      <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-600/20">
-              <Radio className="text-white" size={18} />
-            </div>
-            <h1 className="text-lg font-bold tracking-tight">EchoVault</h1>
+    <div className="min-h-screen pb-24">
+      <header className="p-6 bg-white border-b border-emerald-50 sticky top-0 z-10">
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-bold text-emerald-600">Noor Deen</h1>
+            <p className="text-xs text-zinc-500">Assalamu Alaikum</p>
           </div>
-          
-          <div className="flex items-center gap-3">
-            <button className="p-2 text-zinc-400 hover:text-zinc-900 transition-colors">
-              <Bell size={20} />
-            </button>
-            <div className="w-8 h-8 rounded-full bg-slate-200 border border-slate-300 overflow-hidden">
-              {profile?.avatar_url ? (
-                <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-zinc-400">
-                  <User size={16} />
-                </div>
-              )}
-            </div>
+          <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600">
+            <Home size={20} />
           </div>
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-6">
-        {view === 'feed' ? <Feed /> : <Dashboard />}
+      <main className="p-4 max-w-md mx-auto">
+        {activeView === 'home' && (
+          <div className="space-y-6">
+            <PrayerCard />
+            <div className="bg-emerald-600 rounded-2xl p-6 text-white shadow-lg shadow-emerald-100">
+              <h3 className="text-lg font-semibold mb-2">Daily Hadith</h3>
+              <p className="text-emerald-50 text-sm italic">
+                "The best among you are those who learn the Quran and teach it."
+              </p>
+              <p className="text-xs mt-4 opacity-70">— Sahih Bukhari</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <QuickAction icon={<Book />} label="Quran" onClick={() => setActiveView('quran')} />
+              <QuickAction icon={<Fingerprint />} label="Tasbih" onClick={() => setActiveView('tasbih')} />
+            </div>
+          </div>
+        )}
+
+        {activeView === 'tasbih' && <Tasbih />}
+
+        {activeView === 'prayer' && <PrayerCard expanded />}
+
+        {activeView === 'quran' && (
+          <div className="text-center py-20 text-zinc-400">
+            <Book size={48} className="mx-auto mb-4 opacity-20" />
+            <p>Quran Reader coming soon...</p>
+          </div>
+        )}
       </main>
 
-      {/* Floating Action Button */}
-      <div className="fixed bottom-24 right-6 z-40">
-        <button 
-          onClick={() => setShowRecorder(!showRecorder)}
-          className={`w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 ${
-            showRecorder ? 'bg-zinc-900 rotate-45' : 'bg-emerald-600 hover:scale-110 shadow-emerald-600/40'
-          }`}
-        >
-          {showRecorder ? <Plus className="text-white" size={28} /> : <Mic className="text-white" size={28} />}
-        </button>
-      </div>
-
-      {/* Recorder Overlay */}
-      {showRecorder && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl animate-in slide-in-from-bottom-8 duration-300">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold">Record a Whisper</h3>
-              <button onClick={() => setShowRecorder(false)} className="p-2 hover:bg-stone-100 rounded-full transition-colors">
-                <X size={20} />
-              </button>
-            </div>
-            <Recorder onUploadComplete={() => setShowRecorder(false)} />
-          </div>
-        </div>
-      )}
-
-      {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-6 py-3 z-30">
-        <div className="max-w-md mx-auto flex justify-around items-center">
-          <button 
-            onClick={() => setView('feed')}
-            className={`flex flex-col items-center gap-1 transition-all ${view === 'feed' ? 'text-emerald-600' : 'text-zinc-400 hover:text-zinc-600'}`}
-          >
-            <Radio size={24} className={view === 'feed' ? 'animate-pulse' : ''} />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Feed</span>
-          </button>
-          
-          <button 
-            onClick={() => setView('dashboard')}
-            className={`flex flex-col items-center gap-1 transition-all ${view === 'dashboard' ? 'text-emerald-600' : 'text-zinc-400 hover:text-zinc-600'}`}
-          >
-            <LayoutDashboard size={24} />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Vault</span>
-          </button>
-
-          <button 
-            onClick={() => supabase.auth.signOut()}
-            className="flex flex-col items-center gap-1 text-zinc-400 hover:text-red-500 transition-all"
-          >
-            <LogOut size={24} />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Exit</span>
-          </button>
-        </div>
-      </nav>
+      <BottomNav activeView={activeView} onViewChange={setActiveView} />
     </div>
   );
-}
+};
+
+const QuickAction = ({ icon, label, onClick }: { icon: any, label: string, onClick: () => void }) => (
+  <button 
+    onClick={onClick}
+    className="bg-white p-6 rounded-2xl border border-emerald-50 flex flex-col items-center gap-3 shadow-sm active:scale-95 transition-transform"
+  >
+    <div className="text-emerald-500">{icon}</div>
+    <span className="font-medium text-zinc-700">{label}</span>
+  </button>
+);
+
+export default App;
